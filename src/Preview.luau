@@ -1,7 +1,7 @@
 --!strict
--- Preview: the see-through brush "ghost" under the cursor, the dots of a path, the plane used by
--- Flatten / Plane lock and the rotation gizmo. The ghost lives in the camera with Archivable off, so
--- it is never saved or recorded; path dots, the plane and the gizmo are adornments in CoreGui.
+-- Preview: the see-through brush "ghost" under the cursor, the dots of a path, the Flatten plane, the
+-- Plane lock grid and the rotation gizmo. The ghost lives in the camera with Archivable off, so it is
+-- never saved or recorded; path dots, the plane, the grid and the gizmo are adornments in CoreGui.
 --
 -- Sphere / Cube / Cylinder show as a plain part. Mesh brushes and the other built-in shapes show the
 -- surface of their voxel grid (SurfaceMesh), which stretches correctly with Height.
@@ -24,6 +24,7 @@ export type Preview = typeof(setmetatable({} :: {
 	dots: Folder,
 	pool: { SphereHandleAdornment },
 	plane: BoxHandleAdornment,
+	grid: { { line: LineHandleAdornment, shadow: LineHandleAdornment } },
 	anchor: Part,
 	handles: ArcHandles,
 	ghost: BasePart?,
@@ -33,6 +34,10 @@ export type Preview = typeof(setmetatable({} :: {
 }, Preview))
 
 local PartShapes = Voxelizer.PartShapes
+local GRID_COLOR = Color3.fromRGB(70, 215, 255)
+local GRID_SHADOW = Color3.fromRGB(5, 20, 35) -- dark edge under each grid line, so it shows on light terrain too
+local GRID_CELL = 4 -- smallest grid square: one terrain voxel
+local GRID_LINES = 24 -- most squares across the grid; bigger brushes get bigger squares
 
 local function ghostify(part: BasePart)
 	part.Anchored = true
@@ -98,6 +103,7 @@ function Preview.new(): Preview
 		dots = dots,
 		pool = {},
 		plane = plane,
+		grid = {},
 		anchor = anchor,
 		handles = handles,
 		ghost = nil,
@@ -211,7 +217,7 @@ function Preview.setGhost(self: Preview, cf: CFrame?, scale: Vector3)
 	end
 end
 
--- Show the flatten / plane-lock plane as a thin plate; nil hides it.
+-- Show the Flatten plane as a thin plate; nil hides it.
 function Preview.setPlane(self: Preview, cf: CFrame?, width: number, color: Color3?)
 	local plane = self.plane
 	if not cf then
@@ -220,8 +226,73 @@ function Preview.setPlane(self: Preview, cf: CFrame?, width: number, color: Colo
 	end
 	plane.CFrame = cf
 	plane.Size = Vector3.new(width, 0.15, width)
-	plane.Color3 = color or Color3.fromRGB(120, 200, 255)
+	plane.Color3 = color or GRID_COLOR
 	plane.Visible = true
+end
+
+local function gridLine(parent: Instance, color: Color3, thickness: number, zIndex: number): LineHandleAdornment
+	local line = Instance.new("LineHandleAdornment")
+	line.Name = "GridLine"
+	line.Color3 = color
+	line.Thickness = thickness
+	line.AlwaysOnTop = true
+	line.ZIndex = zIndex
+	line.Adornee = workspace.Terrain
+	line.Archivable = false
+	line.Parent = parent
+	return line
+end
+
+-- Show the Plane lock plane as a grid; nil hides it. `frame` is the plane's grid frame: its Y axis is
+-- the normal and lines sit at whole squares along its X and Z, so the grid stays put on the plane while
+-- the disc of it drawn (`radius` around `centre`, fading near its edge) follows the cursor. `locked`
+-- (painting on the plane) draws it more opaque.
+-- Perf: CPU Low (reuses a pool of at most ~100 line adornments) | Memory Low
+function Preview.setGrid(self: Preview, frame: CFrame?, centre: Vector3, radius: number, locked: boolean?)
+	local n = 0
+	if frame and radius > 0 then
+		local cell = GRID_CELL
+		while radius * 2 / cell > GRID_LINES do
+			cell *= 2
+		end
+		local c = frame:PointToObjectSpace(centre)
+		local base = if locked then 0.05 else 0.4
+		-- Lines across X (running along Z), then across Z (running along X).
+		for axis = 1, 2 do
+			local across = if axis == 1 then c.X else c.Z
+			local dir = if axis == 1 then Vector3.zAxis else Vector3.xAxis
+			for k = math.ceil((across - radius) / cell), math.floor((across + radius) / cell) do
+				local p = k * cell
+				local d = p - across
+				local half = math.sqrt(math.max(radius * radius - d * d, 0))
+				if half < 0.05 then
+					continue -- touches the edge only
+				end
+				local mid = if axis == 1 then Vector3.new(p, 0, c.Z) else Vector3.new(c.X, 0, p)
+				n += 1
+				local pair = self.grid[n]
+				if not pair then
+					pair = { line = gridLine(self.dots, GRID_COLOR, 2, 2), shadow = gridLine(self.dots, GRID_SHADOW, 5, 1) }
+					self.grid[n] = pair
+				end
+				-- A line runs from its CFrame along LookVector.
+				local cf = frame * CFrame.lookAt(mid - dir * half, mid + dir * half)
+				local t = base + (1 - base) * math.min(math.abs(d) / radius, 1) ^ 4
+				for _, line in { pair.line, pair.shadow } do
+					line.CFrame = cf
+					line.Length = half * 2
+					line.Visible = true
+				end
+				pair.line.Transparency = t
+				pair.shadow.Transparency = 1 - (1 - t) * 0.6
+			end
+		end
+	end
+	for i = n + 1, #self.grid do
+		local pair = self.grid[i]
+		pair.line.Visible = false
+		pair.shadow.Visible = false
+	end
 end
 
 -- Show path stamp points, coloured from green (start) to red (end).
@@ -271,6 +342,7 @@ function Preview.hide(self: Preview)
 	self:setGhost(nil, Vector3.one)
 	self:setPath(nil, 1)
 	self:setPlane(nil, 0)
+	self:setGrid(nil, Vector3.zero, 0)
 	self:setHandles(nil)
 end
 
