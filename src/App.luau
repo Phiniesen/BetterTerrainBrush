@@ -58,6 +58,7 @@ local FOLDER_NAME = "TerrainBrushes" -- place brushes live in ServerStorage.Terr
 local RES = 4
 local REPEAT = 0.08 -- seconds between stamps while held still
 local MAX_FILL = 8 -- stamps per frame when a fast stroke leaves a gap
+local PLANE_STEP = math.pi / 4 -- Auto plane lock turns to face the camera in 45° steps
 
 local DEFAULTS: { [string]: any } = {
 	tool = "Draw",
@@ -637,23 +638,36 @@ function App.start(plugin: Plugin, host: Host?)
 		return nil
 	end
 
-	-- Auto plane lock: the plane through the stroke's start, facing the world axis nearest the surface
-	-- normal there (start on the ground → flat plane at that height; start on a cliff → upright plane).
+	-- Auto plane lock: the plane through the stroke's start, facing the camera in 45° steps of tilt and
+	-- of turn: seen from above it is flat, from in between tilted 45°, from in front upright (and the
+	-- same for the sides and diagonals).
 	local function autoPlane(hit: Hit): Plane
-		local n = hit.normal
-		local ax, ay, az = math.abs(n.X), math.abs(n.Y), math.abs(n.Z)
-		local axis = if ay >= ax and ay >= az then Vector3.new(0, math.sign(n.Y), 0)
-			elseif ax >= az then Vector3.new(math.sign(n.X), 0, 0)
-			else Vector3.new(0, 0, math.sign(n.Z))
-		return { point = hit.pos, normal = axis }
+		local toCamera = mouse.UnitRay.Origin - hit.pos
+		if toCamera.Magnitude < 1e-3 then
+			return { point = hit.pos, normal = Vector3.yAxis }
+		end
+		toCamera = toCamera.Unit
+		local tilt = math.round(math.asin(math.clamp(toCamera.Y, -1, 1)) / PLANE_STEP) * PLANE_STEP
+		local turn = math.round(math.atan2(toCamera.Z, toCamera.X) / PLANE_STEP) * PLANE_STEP
+		local level = math.cos(tilt)
+		return { point = hit.pos, normal = Vector3.new(level * math.cos(turn), math.sin(tilt), level * math.sin(turn)) }
 	end
 
-	local function planeCFrame(normal: Vector3, pos: Vector3): CFrame
-		local right = normal:Cross(Vector3.zAxis)
+	-- The plane "Set plane" picks at a cursor hit.
+	local function pickedPlane(hit: Hit): Plane
+		return { point = hit.pos, normal = if S.planeNormal == "Surface" then hit.normal else Vector3.yAxis }
+	end
+
+	-- Frame the plane's grid is drawn in: Y is the normal, X runs level along the plane (world X on flat
+	-- planes) and the origin is the world origin projected onto the plane, so grid lines stay put on it
+	-- (on voxel boundaries for flat planes and upright ones facing an axis).
+	local function gridFrame(plane: Plane): CFrame
+		local normal = plane.normal
+		local right = Vector3.yAxis:Cross(normal)
 		if right.Magnitude < 1e-3 then
-			right = normal:Cross(Vector3.xAxis)
+			right = Vector3.xAxis
 		end
-		return CFrame.fromMatrix(pos, right.Unit, normal)
+		return CFrame.fromMatrix(normal * normal:Dot(plane.point), right.Unit, normal)
 	end
 
 	local function beginRecording()
@@ -842,6 +856,7 @@ function App.start(plugin: Plugin, host: Host?)
 			preview:setHandles(cf, m.size * scale)
 			preview:setPath(nil, 1)
 			preview:setPlane(nil, 0)
+			preview:setGrid(nil, Vector3.zero, 0)
 			return
 		end
 		preview:setHandles(nil)
@@ -898,7 +913,8 @@ function App.start(plugin: Plugin, host: Host?)
 			return
 		end
 
-		local plane = activePlane()
+		-- Picking a plane aims at the terrain, where the click picks it, not at the current plane.
+		local plane = if pickingPlane then nil else activePlane()
 		local hit = cursorHit(plane)
 		if not hit then
 			preview:hide()
@@ -919,10 +935,21 @@ function App.start(plugin: Plugin, host: Host?)
 		if S.tool == "Flatten" then
 			local y = if stroke and stroke.planeY then stroke.planeY else hit.pos.Y
 			preview:setPlane(CFrame.new(hit.pos.X, y, hit.pos.Z), planeWidth(m, scale), OP_COLORS.Flatten)
-		elseif plane then
-			preview:setPlane(planeCFrame(plane.normal, hit.pos), planeWidth(m, scale))
 		else
 			preview:setPlane(nil, 0)
+		end
+		-- Plane lock grid: the plane in use, else the one a click here would lock (a freehand stroke
+		-- under Auto, or Set plane). It turns more opaque once a stroke is painting.
+		local lock = plane
+		if pickingPlane then
+			lock = pickedPlane(hit)
+		elseif not lock and S.planeLock == "Auto" and S.shape == "Freehand" then
+			lock = autoPlane(hit)
+		end
+		if lock then
+			preview:setGrid(gridFrame(lock), hit.pos, planeWidth(m, scale), stroke ~= nil)
+		else
+			preview:setGrid(nil, Vector3.zero, 0)
 		end
 
 		if S.shape ~= "Freehand" then
@@ -1048,7 +1075,7 @@ function App.start(plugin: Plugin, host: Host?)
 		if pickingPlane then
 			local hit = cursorHit(nil)
 			if hit then
-				local n = if S.planeNormal == "Surface" then hit.normal else Vector3.yAxis
+				local n = pickedPlane(hit).normal
 				S.manualPlane = { hit.pos.X, hit.pos.Y, hit.pos.Z, n.X, n.Y, n.Z }
 				save()
 				local c = controls.planeHeight
@@ -1552,7 +1579,7 @@ function App.start(plugin: Plugin, host: Host?)
 			end
 			save()
 		end, 10000)
-		ui:note(setSec, "Plane lock keeps the brush on a plane: Auto uses the plane where the stroke starts (flat on ground, upright on cliffs); Manual uses the plane you set.")
+		ui:note(setSec, "Plane lock keeps the brush on a plane: Auto uses a plane through where the stroke starts, facing the camera in 45° steps (flat seen from above, tilted from in between, upright from the front or side); Manual uses the plane you set.")
 		local fixed = ui:toggle(setSec, "Fixed flatten plane", S.fixedPlane, setter("fixedPlane"))
 		showWhen(fixed.frame, isTool("Flatten"))
 		ui:toggle(setSec, "Ignore water", S.ignoreWater, setter("ignoreWater", invalidatePath))

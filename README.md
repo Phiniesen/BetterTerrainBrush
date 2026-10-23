@@ -61,7 +61,7 @@ The code is split into small modules in [`src/`](src):
 | `Voxelizer.luau` | Turns place Models / MeshParts (by raycasting) and uploaded triangles (by winding number) into voxel masks, plus their distance fields |
 | `MeshImport.luau` | `.obj` and ASCII / binary `.stl` parsers |
 | `Library.luau` | Brushes saved in plugin settings (run-length encoded, base64) |
-| `Preview.luau`, `SurfaceMesh.luau` | The ghost preview, path dots, plane and rotation rings; preview meshes built from voxel masks |
+| `Preview.luau`, `SurfaceMesh.luau` | The ghost preview, path dots, Flatten plane, Plane lock grid and rotation rings; preview meshes built from voxel masks |
 | `Paths.luau` | Parametric paths resampled into evenly spaced stamps |
 | `Materials.luau` | Reads the terrain material slots |
 | `Ui.luau` | A small theme-aware widget kit for the dock panel |
