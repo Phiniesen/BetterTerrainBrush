@@ -1,0 +1,14 @@
+# Build output (attach built plugins to GitHub releases instead)
+*.rbxm
+*.rbxmx
+*.rbxl
+*.rbxlx
+
+# Tooling
+sourcemap.json
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
