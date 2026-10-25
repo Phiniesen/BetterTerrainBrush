@@ -831,7 +831,7 @@ function App.start(plugin: Plugin, host: Host?)
 		return math.max(size.X, size.Z, 8) * 1.6
 	end
 
-	local ADJUST_RANGES = { size = { 1, 800 }, height = { 1, 800 }, strength = { 0.05, 1 } }
+	local ADJUST_RANGES = { size = { 1, 800 }, height = { 1, 800 }, strength = { 0.01, 2 } }
 
 	-- Per-frame update while the tool is active: preview, freehand stamping, path jobs.
 	-- Perf: CPU Low idle (one raycast + ghost move); Medium-High while stamping (see Stamp.apply) | Memory Low
@@ -1503,7 +1503,7 @@ function App.start(plugin: Plugin, host: Host?)
 		local function invalidatePath()
 			pathCache = nil
 		end
-		controls.size = ui:slider(setSec, "Size", S.size, 1, 200, 1, setter("size", invalidatePath), 800)
+		controls.size = ui:slider(setSec, "Size", S.size, 1, 400, 1, setter("size", invalidatePath), 800)
 		controls.height = ui:slider(setSec, "Height", S.height, 1, 200, 1, setter("height", invalidatePath), 800)
 		showWhen(controls.height.frame, function()
 			local shape = currentShape()
@@ -1542,7 +1542,7 @@ function App.start(plugin: Plugin, host: Host?)
 		showWhen(keep.frame, function()
 			return currentShape() == "Grid"
 		end)
-		controls.strength = ui:slider(setSec, "Strength", S.strength, 0.05, 1, 0.05, setter("strength"))
+		controls.strength = ui:slider(setSec, "Strength", S.strength, 0.01, 2, 0.01, setter("strength"))
 		showWhen(controls.strength.frame, function()
 			return S.tool == "Sculpt" or S.tool == "Smooth" or S.tool == "Flatten" or S.tool == "Draw"
 		end)

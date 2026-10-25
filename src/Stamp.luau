@@ -20,7 +20,7 @@ export type Params = {
 	op: string, -- "Add" | "Subtract" | "Grow" | "Erode" | "Smooth" | "Flatten" | "Paint" | "Replace"
 	material: number, -- slot index; Water (1) adds/removes water instead of solid terrain
 	source: number, -- Replace: the slot that gets swapped for `material`
-	strength: number, -- 0..1: Grow, Erode, Smooth, Flatten
+	strength: number, -- 0..2: Grow, Erode, Smooth, Flatten
 	autoMaterial: boolean, -- Add / Grow / Flatten: new terrain copies the material next to it
 	replaceMaterial: boolean, -- Add: also repaint solid terrain inside the brush
 	ignoreWater: boolean, -- leave water alone
@@ -249,7 +249,7 @@ function Stamp.apply(terrain: Terrain, mask: Mask, cf: CFrame, scale: Vector3, p
 		dist = field
 	end
 
-	local strength = math.clamp(p.strength, 0, 1)
+	local strength = math.clamp(p.strength, 0, 2)
 	local autoMat = p.autoMaterial or water
 	local ignoreWater = p.ignoreWater
 	local flattenMode, planeY = p.flattenMode, p.planeY
@@ -355,7 +355,20 @@ function Stamp.apply(terrain: Terrain, mask: Mask, cf: CFrame, scale: Vector3, p
 					if water then
 						newLiq = math.max(0, liq - w * strength)
 					else
-						newOcc = math.max(0, occ - w * strength)
+						-- Only erode terrain open to the air, like the built-in Sculpt. Eroding buried voxels too
+						-- hollows them out unseen until the whole brush caves in at once.
+						local exposed = false
+						if occ > 0 then
+							for _, n in NEIGHBOURS do
+								if not solidAt(mats, occs, sx, sy, sz, ix + n[1], iy + n[2], iz + n[3]) then
+									exposed = true
+									break
+								end
+							end
+						end
+						if exposed then
+							newOcc = math.max(0, occ - w * strength)
+						end
 						if not ignoreWater then
 							newLiq = math.max(0, liq - w * strength)
 						end
@@ -375,14 +388,15 @@ function Stamp.apply(terrain: Terrain, mask: Mask, cf: CFrame, scale: Vector3, p
 							end
 						end
 					end
-					newOcc = math.clamp((own + (sum / 27 - own) * w * strength) / RES, 0, 1)
+					-- Blend capped at 1: past the average would overshoot and ripple.
+					newOcc = math.clamp((own + (sum / 27 - own) * math.min(w * strength, 1)) / RES, 0, 1)
 					if newOcc > occ and empty then
 						newMat = newMaterial(ix, iy, iz, true)
 					end
 				elseif op == "Flatten" then
 					-- How full this voxel must be for the ground surface to sit on the plane.
 					local target = math.clamp((planeY - wy) / RES, 0, 1)
-					local t = w * strength
+					local t = math.min(w * strength, 1) -- past 1 would overshoot the plane
 					if target < occ and flattenMode ~= "Grow" then
 						newOcc = occ + (target - occ) * t
 					elseif target > occ and flattenMode ~= "Erode" then
